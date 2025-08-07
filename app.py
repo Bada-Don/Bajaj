@@ -4,6 +4,7 @@ import hashlib
 import logging
 from contextlib import asynccontextmanager
 from io import BytesIO
+import os
 
 from config import Config
 from models.schemas import (
@@ -96,24 +97,23 @@ async def upload_document_from_url(
         # Generate document ID if not provided
         if not document_id:
             document_id = hashlib.md5(url.encode()).hexdigest()[:8]
-        
         # Extract text from URL
-        text = doc_proc.extract_text_from_url(url)
-        
-        if not text.strip():
-            raise HTTPException(status_code=400, detail="No text could be extracted from the document")
-        
-        # Chunk the text
-        chunks = doc_proc.chunk_text(text)
-        
-        # Store embeddings
-        chunks_created = embed_service.store_embeddings(document_id, chunks)
-        
-        return DocumentUploadResponse(
-            message="Document processed successfully",
-            document_id=document_id,
-            chunks_created=chunks_created
-        )
+        text, temp_file_path = doc_proc.extract_text_from_url(url)
+        try:
+            if not text.strip():
+                raise HTTPException(status_code=400, detail="No text could be extracted from the document")
+            # Chunk the text
+            chunks = doc_proc.chunk_text(text)
+            # Store embeddings
+            chunks_created = embed_service.store_embeddings(document_id, chunks)
+            return DocumentUploadResponse(
+                message="Document processed successfully",
+                document_id=document_id,
+                chunks_created=chunks_created
+            )
+        finally:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
         
     except Exception as e:
         logger.error(f"Document processing failed: {e}")
@@ -223,43 +223,39 @@ async def process_hackrx_request(
     
     try:
         # Extract text from URL
-        text = doc_proc.extract_text_from_url(str(request.documents))
-        
-        if not text.strip():
-            raise HTTPException(status_code=400, detail="No text could be extracted from the document")
-        
-        # Generate document ID
-        document_id = hashlib.md5(str(request.documents).encode()).hexdigest()[:8]
-        
-        # Chunk the text and store embeddings
-        chunks = doc_proc.chunk_text(text)
-        embed_service.store_embeddings(document_id, chunks)
-        
-        # Process each question
-        answers = []
-        for question in request.questions:
-            # Initial similarity search
-            similar_results = embed_service.search_similar(
-                question, 
-                top_k=Config.TOP_K_INITIAL
-            )
-            
-            if not similar_results:
-                answers.append("No relevant information found for this question.")
-                continue
-            
-            # Rerank results
-            top_snippets = search_service.rerank_results(
-                question,
-                similar_results,
-                top_k=Config.TOP_K_RERANKED
-            )
-            
-            # Generate answer
-            answer = search_service.generate_answer(question, top_snippets)
-            answers.append(answer)
-        
-        return HackRXResponse(answers=answers)
+        text, temp_file_path = doc_proc.extract_text_from_url(str(request.documents))
+        try:
+            if not text.strip():
+                raise HTTPException(status_code=400, detail="No text could be extracted from the document")
+            # Generate document ID
+            document_id = hashlib.md5(str(request.documents).encode()).hexdigest()[:8]
+            # Chunk the text and store embeddings
+            chunks = doc_proc.chunk_text(text)
+            embed_service.store_embeddings(document_id, chunks)
+            # Process each question
+            answers = []
+            for question in request.questions:
+                # Initial similarity search
+                similar_results = embed_service.search_similar(
+                    question, 
+                    top_k=Config.TOP_K_INITIAL
+                )
+                if not similar_results:
+                    answers.append("No relevant information found for this question.")
+                    continue
+                # Rerank results
+                top_snippets = search_service.rerank_results(
+                    question,
+                    similar_results,
+                    top_k=Config.TOP_K_RERANKED
+                )
+                # Generate answer
+                answer = search_service.generate_answer(question, top_snippets)
+                answers.append(answer)
+            return HackRXResponse(answers=answers)
+        finally:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
         
     except Exception as e:
         logger.error(f"HackRX processing failed: {e}")

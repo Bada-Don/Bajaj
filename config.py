@@ -5,7 +5,7 @@ load_dotenv()
 
 class Config:
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-    DATABASE_URL = os.getenv("DATABASE_URL")
+    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
     
     # Model settings

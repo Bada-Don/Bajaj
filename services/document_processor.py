@@ -12,20 +12,17 @@ class DocumentProcessor:
         self.chunk_length = chunk_length
         self.chunk_overlap = chunk_overlap
     
-    def extract_text_from_url(self, url: str) -> str:
-        """Extract text from PDF or DOCX URL"""
+    def extract_text_from_url(self, url: str) -> tuple:
+        """Extract text from PDF or DOCX URL and return (text, temp_file_path)"""
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             try:
                 response = requests.get(url, timeout=30)
                 response.raise_for_status()
-                
                 temp_file.write(response.content)
                 temp_file.flush()
-                
-                # For testing: log the temporary file location
                 print(f"Debug: Temporary file created at {temp_file.name}")
-                return self._extract_text_from_file(temp_file.name)
-            
+                text = self._extract_text_from_file(temp_file.name)
+                return text, temp_file.name
             except Exception as e:
                 print(f"Debug: Error processing URL: {e}")
                 raise
