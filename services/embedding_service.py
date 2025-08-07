@@ -1,6 +1,5 @@
 import numpy as np
 import psycopg2
-from pgvector.psycopg2 import register_vector
 from sentence_transformers import SentenceTransformer
 import json
 from typing import List, Tuple
@@ -19,31 +18,19 @@ class EmbeddingService:
         try:
             conn = psycopg2.connect(self.database_url)
             with conn.cursor() as cur:
-                # Enable pgvector extension
-                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-                
-                # Create embeddings table
+                # Create embeddings table with FLOAT[] for embedding
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS embeddings (
                         id SERIAL PRIMARY KEY,
                         document_id VARCHAR(255),
                         chunk_text TEXT,
-                        embedding vector(384),
+                        embedding FLOAT[],
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
-                
-                # Create index for similarity search
-                cur.execute("""
-                    CREATE INDEX IF NOT EXISTS embeddings_vector_idx 
-                    ON embeddings USING ivfflat (embedding vector_cosine_ops)
-                """)
-                
             conn.commit()
             conn.close()
-            register_vector(conn)
             logger.info("Database initialized successfully")
-            
         except Exception as e:
             logger.error(f"Database initialization failed: {e}")
             raise
@@ -51,25 +38,20 @@ class EmbeddingService:
     def store_embeddings(self, document_id: str, chunks: List[str]) -> int:
         """Store document chunks and their embeddings"""
         conn = psycopg2.connect(self.database_url)
-        register_vector(conn)
-        
         try:
             with conn.cursor() as cur:
                 # Delete existing embeddings for this document
                 cur.execute("DELETE FROM embeddings WHERE document_id = %s", (document_id,))
-                
                 # Generate and store new embeddings
                 for chunk in chunks:
                     embedding = self.model.encode(f"passage: {chunk}")
                     cur.execute("""
                         INSERT INTO embeddings (document_id, chunk_text, embedding)
                         VALUES (%s, %s, %s)
-                    """, (document_id, chunk, embedding.tolist()))
-                
+                    """, (document_id, chunk, list(map(float, embedding))))
             conn.commit()
             logger.info(f"Stored {len(chunks)} embeddings for document {document_id}")
             return len(chunks)
-            
         except Exception as e:
             conn.rollback()
             logger.error(f"Failed to store embeddings: {e}")
@@ -80,22 +62,19 @@ class EmbeddingService:
     def search_similar(self, query: str, top_k: int = 100) -> List[Tuple[str, float]]:
         """Search for similar chunks using cosine similarity"""
         query_embedding = self.model.encode(f"query: {query}")
-        
         conn = psycopg2.connect(self.database_url)
-        register_vector(conn)
-        
         try:
             with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT chunk_text, 1 - (embedding <=> %s) as similarity
-                    FROM embeddings
-                    ORDER BY embedding <=> %s
-                    LIMIT %s
-                """, (query_embedding.tolist(), query_embedding.tolist(), top_k))
-                
+                cur.execute("SELECT chunk_text, embedding FROM embeddings")
                 results = cur.fetchall()
-                return [(text, float(sim)) for text, sim in results]
-                
+                scored = []
+                for text, emb in results:
+                    emb_np = np.array(emb, dtype=np.float32)
+                    sim = float(np.dot(query_embedding, emb_np) / (np.linalg.norm(query_embedding) * np.linalg.norm(emb_np) + 1e-10))
+                    scored.append((text, sim))
+                # Sort by similarity descending and return top_k
+                scored.sort(key=lambda x: x[1], reverse=True)
+                return scored[:top_k]
         except Exception as e:
             logger.error(f"Search failed: {e}")
             raise
