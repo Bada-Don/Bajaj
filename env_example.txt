@@ -1,0 +1,27 @@
+# API Keys
+GOOGLE_API_KEY=your_google_api_key_here
+
+# Database Configuration
+DATABASE_URL=sqlite:///./test.db
+# For PostgreSQL: postgresql://username:password@localhost:5432/dbname
+
+# Redis Configuration (optional)
+REDIS_URL=redis://localhost:6379
+
+# Server Configuration
+PORT=8000
+
+# Model Configuration
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L6-v2
+
+# Document Processing
+CHUNK_LENGTH=600
+CHUNK_OVERLAP=200
+
+# Search Configuration
+TOP_K_INITIAL=100
+TOP_K_RERANKED=5
+
+# File Upload Limits
+MAX_FILE_SIZE=10485760  # 10MB in bytes 
