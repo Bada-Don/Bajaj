@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 from typing import List, Optional
 
 class SearchRequest(BaseModel):
@@ -18,3 +18,10 @@ class DocumentUploadResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     models_loaded: bool
+
+class HackRXRequest(BaseModel):
+    documents: HttpUrl
+    questions: List[str]
+
+class HackRXResponse(BaseModel):
+    answers: List[str]

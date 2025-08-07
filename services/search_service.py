@@ -32,7 +32,15 @@ class SearchService:
     
     def generate_answer(self, query: str, context_snippets: List[str]) -> str:
         """Generate answer using Gemini API"""
+        if not context_snippets:
+            logger.warning(f"No context snippets provided for query: {query}")
+            return "I apologize, but I couldn't find relevant information to answer this question."
+            
         combined_context = "\n".join(context_snippets)
+        logger.info(f"Processing query: {query}")
+        logger.info(f"Context length: {len(combined_context)} characters")
+        logger.debug(f"Context snippets: {context_snippets}")
+        
         prompt = f"""Answer based on the following query and retrieved relevant info:
 
 Query: {query}
@@ -40,16 +48,24 @@ Query: {query}
 Relevant Info: {combined_context}
 
 Please provide a concise and accurate answer based only on the provided information."""
+        
         try:
-            response = genai.generate_content(
-                model="gemini-2.0-flash-exp",
-                contents=prompt,
-                generation_config=types.GenerationConfig(
+            logger.info("Calling Gemini API...")
+            # Get the model
+            model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            
+            # Generate response using generate_content
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
                     max_output_tokens=150,
-                    temperature=0.1
                 )
             )
+            
+            logger.info("Successfully received response from Gemini API")
             return response.text
+            
         except Exception as e:
-            logger.error(f"Answer generation failed: {e}")
+            logger.error(f"Answer generation failed: {str(e)}")
+            logger.exception("Full exception details:")
             return "I apologize, but I couldn't generate an answer at this time."

@@ -61,22 +61,43 @@ class EmbeddingService:
     
     def search_similar(self, query: str, top_k: int = 100) -> List[Tuple[str, float]]:
         """Search for similar chunks using cosine similarity"""
+        logger.info(f"Searching for query: {query}")
         query_embedding = self.model.encode(f"query: {query}")
         conn = psycopg2.connect(self.database_url)
         try:
             with conn.cursor() as cur:
+                # First check if we have any embeddings at all
+                cur.execute("SELECT COUNT(*) FROM embeddings")
+                count = cur.fetchone()[0]
+                logger.info(f"Total embeddings in database: {count}")
+                
+                if count == 0:
+                    logger.warning("No embeddings found in database")
+                    return []
+                
                 cur.execute("SELECT chunk_text, embedding FROM embeddings")
                 results = cur.fetchall()
+                logger.info(f"Retrieved {len(results)} chunks for comparison")
+                
                 scored = []
                 for text, emb in results:
                     emb_np = np.array(emb, dtype=np.float32)
                     sim = float(np.dot(query_embedding, emb_np) / (np.linalg.norm(query_embedding) * np.linalg.norm(emb_np) + 1e-10))
                     scored.append((text, sim))
+                
                 # Sort by similarity descending and return top_k
                 scored.sort(key=lambda x: x[1], reverse=True)
-                return scored[:top_k]
+                top_results = scored[:top_k]
+                
+                logger.info(f"Found {len(top_results)} relevant results")
+                if top_results:
+                    logger.info(f"Top similarity score: {top_results[0][1]}")
+                
+                return top_results
+                
         except Exception as e:
-            logger.error(f"Search failed: {e}")
+            logger.error(f"Search failed: {str(e)}")
+            logger.exception("Full exception details:")
             raise
         finally:
             conn.close()

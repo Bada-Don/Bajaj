@@ -5,6 +5,7 @@ import magic
 from PyPDF2 import PdfReader
 from docx import Document
 from typing import List
+from io import BytesIO
 
 class DocumentProcessor:
     def __init__(self, chunk_length: int = 600, chunk_overlap: int = 200):
@@ -21,14 +22,38 @@ class DocumentProcessor:
                 temp_file.write(response.content)
                 temp_file.flush()
                 
+                # For testing: log the temporary file location
+                print(f"Debug: Temporary file created at {temp_file.name}")
                 return self._extract_text_from_file(temp_file.name)
             
-            finally:
-                os.unlink(temp_file.name)
+            except Exception as e:
+                print(f"Debug: Error processing URL: {e}")
+                raise
     
-    def extract_text_from_file(self, file_path: str) -> str:
-        """Extract text from local file"""
-        return self._extract_text_from_file(file_path)
+    def extract_text_from_buffer(self, file_buffer: 'BytesIO', filename: str) -> str:
+        """Extract text from a file in memory"""
+        # Get the file type based on content
+        content_start = file_buffer.read(2048)
+        file_buffer.seek(0)  # Reset position after reading
+        
+        mime = magic.Magic(mime=True)
+        file_type = mime.from_buffer(content_start)
+        
+        text = ""
+        if file_type == "application/pdf":
+            reader = PdfReader(file_buffer)
+            for page in reader.pages:
+                text += page.extract_text() or ""
+                
+        elif file_type in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
+                          "application/msword"]:
+            doc = Document(file_buffer)
+            for paragraph in doc.paragraphs:
+                text += paragraph.text + "\n"
+        else:
+            raise ValueError(f"Unsupported file type: {file_type}")
+                
+        return text.strip()
     
     def _extract_text_from_file(self, file_path: str) -> str:
         """Internal method to extract text based on file type"""
@@ -51,7 +76,12 @@ class DocumentProcessor:
         else:
             raise ValueError(f"Unsupported file type: {file_type}")
         
-        return text
+        return text.strip()
+    
+    def extract_text_from_file(self, file_path: str) -> str:
+        """Extract text from local file"""
+        with open(file_path, 'rb') as f:
+            return self.extract_text_from_buffer(BytesIO(f.read()), os.path.basename(file_path))
     
     def chunk_text(self, text: str) -> List[str]:
         """Split text into overlapping chunks"""

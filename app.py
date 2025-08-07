@@ -1,13 +1,15 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
-import tempfile
-import os
 import hashlib
 import logging
 from contextlib import asynccontextmanager
+from io import BytesIO
 
 from config import Config
-from models.schemas import SearchRequest, SearchResponse, DocumentUploadResponse, HealthResponse
+from models.schemas import (
+    SearchRequest, SearchResponse, DocumentUploadResponse, 
+    HealthResponse, HackRXRequest, HackRXResponse
+)
 from services.document_processor import DocumentProcessor
 from services.embedding_service import EmbeddingService
 from services.search_service import SearchService
@@ -135,33 +137,32 @@ async def upload_document_file(
         if not document_id:
             document_id = hashlib.md5(file.filename.encode()).hexdigest()[:8]
         
-        # Save uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        try:
+            # Read file content into memory
             content = await file.read()
-            temp_file.write(content)
-            temp_file.flush()
+            file_buffer = BytesIO(content)
             
-            try:
-                # Extract text
-                text = doc_proc.extract_text_from_file(temp_file.name)
+            # Extract text directly from the buffer
+            text = doc_proc.extract_text_from_buffer(file_buffer, file.filename)
+            
+            if not text.strip():
+                raise HTTPException(status_code=400, detail="No text could be extracted from the document")
+            
+            # Chunk the text
+            chunks = doc_proc.chunk_text(text)
+            
+            # Store embeddings
+            chunks_created = embed_service.store_embeddings(document_id, chunks)
+            
+            return DocumentUploadResponse(
+                message="Document processed successfully",
+                document_id=document_id,
+                chunks_created=chunks_created
+            )
                 
-                if not text.strip():
-                    raise HTTPException(status_code=400, detail="No text could be extracted from the document")
-                
-                # Chunk the text
-                chunks = doc_proc.chunk_text(text)
-                
-                # Store embeddings
-                chunks_created = embed_service.store_embeddings(document_id, chunks)
-                
-                return DocumentUploadResponse(
-                    message="Document processed successfully",
-                    document_id=document_id,
-                    chunks_created=chunks_created
-                )
-                
-            finally:
-                os.unlink(temp_file.name)
+        finally:
+            # Ensure the buffer is closed
+            file_buffer.close()
                 
     except Exception as e:
         logger.error(f"Document processing failed: {e}")
@@ -211,6 +212,58 @@ async def search_documents(
     except Exception as e:
         logger.error(f"Search failed: {e}")
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+@app.post("/hackrx/run", response_model=HackRXResponse)
+async def process_hackrx_request(
+    request: HackRXRequest,
+    services = Depends(get_services)
+):
+    """Process multiple questions for a given document URL"""
+    doc_proc, embed_service, search_service = services
+    
+    try:
+        # Extract text from URL
+        text = doc_proc.extract_text_from_url(str(request.documents))
+        
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="No text could be extracted from the document")
+        
+        # Generate document ID
+        document_id = hashlib.md5(str(request.documents).encode()).hexdigest()[:8]
+        
+        # Chunk the text and store embeddings
+        chunks = doc_proc.chunk_text(text)
+        embed_service.store_embeddings(document_id, chunks)
+        
+        # Process each question
+        answers = []
+        for question in request.questions:
+            # Initial similarity search
+            similar_results = embed_service.search_similar(
+                question, 
+                top_k=Config.TOP_K_INITIAL
+            )
+            
+            if not similar_results:
+                answers.append("No relevant information found for this question.")
+                continue
+            
+            # Rerank results
+            top_snippets = search_service.rerank_results(
+                question,
+                similar_results,
+                top_k=Config.TOP_K_RERANKED
+            )
+            
+            # Generate answer
+            answer = search_service.generate_answer(question, top_snippets)
+            answers.append(answer)
+        
+        return HackRXResponse(answers=answers)
+        
+    except Exception as e:
+        logger.error(f"HackRX processing failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
