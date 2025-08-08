@@ -11,7 +11,7 @@ class Config:
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
     
     # Model settings
-    EMBEDDING_MODEL = "intfloat/e5-large-v2"
+    EMBEDDING_MODEL = "all-MiniLM-L6-v2"
     RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     
     # Document processing
