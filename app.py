@@ -15,6 +15,10 @@ from services.document_processor import DocumentProcessor
 from services.embedding_service import EmbeddingService
 from services.search_service import SearchService
 
+import asyncio
+from functools import partial
+
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -218,42 +222,52 @@ async def process_hackrx_request(
     request: HackRXRequest,
     services = Depends(get_services)
 ):
-    """Process multiple questions for a given document URL"""
-    doc_proc, embed_service, search_service = services
+    """Process multiple questions for a given document URL in parallel"""
+    doc_proc, embed_service, search_serv = services
     
     try:
-        # Extract text from URL
+        # STEP 1: Process the document (this happens once)
         text, temp_file_path = doc_proc.extract_text_from_url(str(request.documents))
         try:
             if not text.strip():
                 raise HTTPException(status_code=400, detail="No text could be extracted from the document")
-            # Generate document ID
+
             document_id = hashlib.md5(str(request.documents).encode()).hexdigest()[:8]
-            # Chunk the text and store embeddings
             chunks = doc_proc.chunk_text(text)
-            embed_service.store_embeddings(document_id, chunks)
-            # Process each question
-            answers = []
-            for question in request.questions:
-                # Initial similarity search
-                similar_results = embed_service.search_similar(
-                    question, 
-                    top_k=Config.TOP_K_INITIAL
-                )
+            
+            # Store chunks, then load into memory to build the FAISS index
+            embed_service.store_chunks(document_id, chunks)
+            embed_service.load_document_into_memory(document_id)
+
+            # STEP 2: Define the processing pipeline for a single question
+            async def process_single_question(question: str):
+                # a) Similarity search (fast, synchronous)
+                similar_results = embed_service.search_similar(question, top_k=Config.TOP_K_INITIAL)
                 if not similar_results:
-                    answers.append("No relevant information found for this question.")
-                    continue
-                # Rerank results
-                top_snippets = search_service.rerank_results(
-                    question,
-                    similar_results,
+                    return "No relevant information found for this question."
+
+                # b) Reranking (CPU-bound, run in a thread to not block asyncio)
+                # Use functools.partial to prepare the function call for to_thread
+                rerank_func = partial(
+                    search_serv.rerank_results,
+                    query=question,
+                    results=similar_results,
                     top_k=Config.TOP_K_RERANKED
                 )
-                # Generate answer
-                answer = search_service.generate_answer(question, top_snippets)
-                answers.append(answer)
+                top_snippets = await asyncio.to_thread(rerank_func)
+
+                # c) Generate Answer (I/O-bound, run asynchronously)
+                answer = await search_serv.generate_answer_async(question, top_snippets)
+                return answer
+
+            # STEP 3: Run the pipeline for all questions concurrently
+            tasks = [process_single_question(q) for q in request.questions]
+            answers = await asyncio.gather(*tasks)
+            
             return HackRXResponse(answers=answers)
+        
         finally:
+            # Cleanup the temporary file
             if temp_file_path and os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
         
