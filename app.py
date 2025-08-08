@@ -6,6 +6,10 @@ from contextlib import asynccontextmanager
 from io import BytesIO
 import os
 
+import asyncio
+from functools import partial
+import sqlite3 # Import sqlite3 to check for existing chunks
+
 from config import Config
 from models.schemas import (
     SearchRequest, SearchResponse, DocumentUploadResponse, 
@@ -217,64 +221,74 @@ async def search_documents(
         logger.error(f"Search failed: {e}")
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
+def document_exists(db_path: str, document_id: str) -> bool:
+    """Check if a document's chunks are already in the database."""
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM chunks WHERE document_id = ? LIMIT 1", (document_id,))
+        return cur.fetchone() is not None
+
 @app.post("/hackrx/run", response_model=HackRXResponse)
 async def process_hackrx_request(
     request: HackRXRequest,
     services = Depends(get_services)
 ):
-    """Process multiple questions for a given document URL in parallel"""
+    """Process multiple questions for a given document URL in parallel with caching."""
     doc_proc, embed_service, search_serv = services
     
+    document_id = hashlib.md5(str(request.documents).encode()).hexdigest()[:8]
+    db_path = embed_service.db_path # Get db_path from the service
+
     try:
-        # STEP 1: Process the document (this happens once)
-        text, temp_file_path = doc_proc.extract_text_from_url(str(request.documents))
-        try:
-            if not text.strip():
-                raise HTTPException(status_code=400, detail="No text could be extracted from the document")
+        # STEP 1: Process document ONLY if it's not cached
+        if not document_exists(db_path, document_id):
+            logger.info(f"Document {document_id} not found in cache. Processing from URL.")
+            text, temp_file_path = doc_proc.extract_text_from_url(str(request.documents))
+            try:
+                if not text.strip():
+                    raise HTTPException(status_code=400, detail="No text could be extracted from the document")
+                chunks = doc_proc.chunk_text(text)
+                embed_service.store_chunks(document_id, chunks)
+                logger.info(f"Document {document_id} processed and cached.")
+            finally:
+                if 'temp_file_path' in locals() and temp_file_path and os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+        else:
+            logger.info(f"Document {document_id} found in cache. Skipping processing.")
 
-            document_id = hashlib.md5(str(request.documents).encode()).hexdigest()[:8]
-            chunks = doc_proc.chunk_text(text)
-            
-            # Store chunks, then load into memory to build the FAISS index
-            embed_service.store_chunks(document_id, chunks)
-            embed_service.load_document_into_memory(document_id)
+        # STEP 2: Load document chunks and build FAISS index
+        embed_service.load_document_into_memory(document_id)
 
-            # STEP 2: Define the processing pipeline for a single question
-            async def process_single_question(question: str):
-                # a) Similarity search (fast, synchronous)
-                similar_results = embed_service.search_similar(question, top_k=Config.TOP_K_INITIAL)
-                if not similar_results:
-                    return "No relevant information found for this question."
+        # STEP 3: Define the processing pipeline for a single question
+        async def process_single_question(question: str):
+            # a) Similarity search (fast, synchronous)
+            similar_results = embed_service.search_similar(question, top_k=Config.TOP_K_INITIAL)
+            if not similar_results:
+                return "No relevant information found for this question."
 
-                # b) Reranking (CPU-bound, run in a thread to not block asyncio)
-                # Use functools.partial to prepare the function call for to_thread
-                rerank_func = partial(
-                    search_serv.rerank_results,
-                    query=question,
-                    results=similar_results,
-                    top_k=Config.TOP_K_RERANKED
-                )
-                top_snippets = await asyncio.to_thread(rerank_func)
+            # b) Reranking (CPU-bound, run in a thread to not block asyncio)
+            rerank_func = partial(
+                search_serv.rerank_results,
+                query=question,
+                results=similar_results,
+                top_k=Config.TOP_K_RERANKED
+            )
+            top_snippets = await asyncio.to_thread(rerank_func)
 
-                # c) Generate Answer (I/O-bound, run asynchronously)
-                answer = await search_serv.generate_answer_async(question, top_snippets)
-                return answer
+            # c) Generate Answer (I/O-bound, run asynchronously)
+            answer = await search_serv.generate_answer_async(question, top_snippets)
+            return answer
 
-            # STEP 3: Run the pipeline for all questions concurrently
-            tasks = [process_single_question(q) for q in request.questions]
-            answers = await asyncio.gather(*tasks)
-            
-            return HackRXResponse(answers=answers)
+        # STEP 4: Run the pipeline for all questions concurrently
+        tasks = [process_single_question(q) for q in request.questions]
+        answers = await asyncio.gather(*tasks)
         
-        finally:
-            # Cleanup the temporary file
-            if temp_file_path and os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-        
+        return HackRXResponse(answers=answers)
+    
     except Exception as e:
-        logger.error(f"HackRX processing failed: {e}")
+        logger.error(f"HackRX processing failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
-
+        
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

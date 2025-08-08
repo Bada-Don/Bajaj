@@ -1,3 +1,5 @@
+# config.py
+
 import os
 from dotenv import load_dotenv
 
@@ -10,14 +12,14 @@ class Config:
     
     # Model settings
     EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-    RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L6-v2"
+    RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     
     # Document processing
     CHUNK_LENGTH = 600
     CHUNK_OVERLAP = 200
     
     # Search settings
-    TOP_K_INITIAL = 100
+    TOP_K_INITIAL = 25  # <-- CHANGED FROM 100 to 25
     TOP_K_RERANKED = 5
     
     # API settings
