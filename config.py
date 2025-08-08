@@ -2,6 +2,7 @@
 
 import os
 from dotenv import load_dotenv
+import torch
 
 load_dotenv()
 
@@ -11,7 +12,7 @@ class Config:
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
     
     # Model settings
-    EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+    EMBEDDING_MODEL = "intfloat/e5-small-v2"
     RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     
     # Document processing
@@ -24,3 +25,5 @@ class Config:
     
     # API settings
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

@@ -11,7 +11,7 @@ import os
 logger = logging.getLogger(__name__)
 
 class EmbeddingService:
-    def __init__(self, database_url: str, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, database_url: str, model_name: str = "intfloat/e5-small-v2"):
         self.database_url = database_url
         self.model = SentenceTransformer(model_name)
         self.db_path = self._get_sqlite_path()
