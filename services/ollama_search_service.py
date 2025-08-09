@@ -2,6 +2,7 @@ import numpy
 import ollama
 import logging
 import asyncio
+import os
 from config import Config
 from typing import List, Tuple
 from sentence_transformers import CrossEncoder
@@ -37,7 +38,8 @@ class SearchService:
             logger.warning(f"No context snippets provided for query: {query}")
             return "The answer to this question is not available in the provided information."
 
-        instructions = open("instructions.txt", "r").read()
+        instructions_path = os.path.join(os.path.dirname(__file__), "instructions.txt")
+        instructions = open(instructions_path, "r").read()
         combined_context = "\n---\n".join(context_snippets)
 
         prompt = instructions + "\n\n" + "Relevant Info:" + "\n" + combined_context + "\n\n" + "Query:" + "\n" + query
@@ -48,7 +50,7 @@ class SearchService:
                 model=self.llm_model_name,
                 prompt=prompt,
                 options={
-                    'num_predict': 256,
+                    'num_predict': 512,
                     'temperature': 0.0,
                 }
             )

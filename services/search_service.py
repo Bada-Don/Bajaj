@@ -6,6 +6,7 @@ from typing import List, Tuple
 import logging
 import asyncio
 from config import Config  # Import Config to access the DEVICE setting
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +39,47 @@ class SearchService:
         scored_results.sort(key=lambda x: x[1], reverse=True)
         
         return [text for text, _ in scored_results[:top_k]]
+    
+    def clean_text(self, text: str) -> str:
+        """
+        A more comprehensive function to remove common markdown symbols and artifacts.
+        """
+        # Remove headings (e.g., #, ##, ###)
+        text = re.sub(r'#+\s*', '', text)
+        
+        # Remove quotes
+        text = text.replace('"', '')
+        text = text.replace("'", "")
+
+        # Remove bold and italics
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # **bold**
+        text = re.sub(r'__(.*?)__', r'\1', text)  # __bold__
+        text = re.sub(r'\*(.*?)\*', r'\1', text)    # *italic*
+        text = re.sub(r'_(.*?)_', r'\1', text)    # _italic_
+        
+        # Remove strikethrough
+        text = re.sub(r'~~(.*?)~~', r'\1', text)
+        
+        # Remove inline code backticks
+        text = re.sub(r'`(.*?)`', r'\1', text)
+        
+        # Remove list markers (*, -, +, 1., 2.)
+        text = re.sub(r'^\s*[\*\-\+]\s*', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^\s*\d+\.\s*', '', text, flags=re.MULTILINE)
+        
+        # Remove blockquotes
+        text = re.sub(r'^\s*>\s*', '', text, flags=re.MULTILINE)
+        
+        # Remove horizontal rules
+        text = re.sub(r'^\s*[-*_]{3,}\s*$', '', text, flags=re.MULTILINE)
+        
+        # Handle simple tables by replacing pipes with spaces
+        text = text.replace('|', ' ')
+        
+        # Replace newlines and multiple spaces with a single space
+        text = re.sub(r'\s+', ' ', text)
+        
+        return text.strip()
 
     async def generate_answer_async(self, query: str, context_snippets: List[str]) -> str:
         """
@@ -59,16 +101,13 @@ Answer the user's 'Query' using *only* the information available in the 'Relevan
 **Rules:**
 1.  **Strict Grounding:** Your entire answer must be derived from the 'Relevant Info'. Do not add outside information or make assumptions.
 2.  **"Not Found" Condition:** If the answer to the 'Query' cannot be found in the 'Relevant Info', you MUST reply with the following exact phrase and nothing else: `The answer to this question is not available in the provided information.`
-3.  **No Formatting:** Do not use any markdown like bold (`**`), italics (`*`), or lists. Respond in plain text only.
-4.  **Completeness:** Formulate a complete, comprehensive answer. Do not leave sentences unfinished.
-
-**Relevant Info:**
-{combined_context}
+3.  **Completeness:** Formulate a complete, comprehensive answer. Do not leave sentences unfinished.
 
 **Query:**
 {query}
 
-**Answer:**
+**Relevant Info:**
+{combined_context}
 """
         
         try:
@@ -90,7 +129,10 @@ Answer the user's 'Query' using *only* the information available in the 'Relevan
                 return "The answer to this question is not available in the provided information."
 
             # Return the clean text, stripping any potential leading/trailing whitespace
-            return response.text.strip()
+            raw_answer = response.text
+            cleaned_answer = self.clean_text(raw_answer)
+            logger.info(f"Cleaned Answer: {cleaned_answer}")
+            return cleaned_answer
             
         except Exception as e:
             logger.error(f"Async answer generation failed for query '{query}': {str(e)}")

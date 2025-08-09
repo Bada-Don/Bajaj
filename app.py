@@ -1,10 +1,13 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 import hashlib
 import logging
 from contextlib import asynccontextmanager
 from io import BytesIO
 import os
+import json
+from datetime import datetime
 
 import asyncio
 from functools import partial
@@ -26,6 +29,13 @@ from functools import partial
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Configure API logger to write to file
+api_logger = logging.getLogger("api_calls")
+api_handler = logging.FileHandler('api_calls.log')
+api_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+api_logger.addHandler(api_handler)
+api_logger.setLevel(logging.INFO)
 
 # Global service instances
 doc_processor = None
@@ -61,12 +71,50 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down services...")
 
+class RequestResponseLoggerMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if "/hackrx/run" not in request.url.path:
+            return await call_next(request)
+
+        req_body_bytes = await request.body()
+        req_body_str = req_body_bytes.decode('utf-8')
+        
+        response = await call_next(request)
+        
+        res_body_bytes = b''
+        async for chunk in response.body_iterator:
+            res_body_bytes += chunk
+        res_body_str = res_body_bytes.decode('utf-8')
+
+        try:
+            log_data = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "request": json.loads(req_body_str),
+                "response": json.loads(res_body_str)
+            }
+            api_logger.info(json.dumps(log_data))
+        except json.JSONDecodeError:
+             # Handle cases where the response might not be JSON (e.g., an error response)
+             logger.error("Could not log API call: response was not valid JSON.")
+        except Exception as e:
+            logger.error(f"Error during API logging: {e}")
+
+        return Response(
+            content=res_body_bytes,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type
+        )
+
 app = FastAPI(
     title="Document Search API",
     description="RAG-based document search and Q&A system",
     version="1.0.0",
     lifespan=lifespan
 )
+
+app.add_middleware(RequestResponseLoggerMiddleware)
+
 
 # Add CORS middleware
 app.add_middleware(
@@ -206,7 +254,7 @@ async def search_documents(
         )
         
         # Generate answer
-        answer = search_service.generate_answer(request.query, top_snippets)
+        answer = await search_service.generate_answer_async(request.query, top_snippets)
         
         # Calculate average confidence score
         avg_confidence = sum(score for _, score in similar_results[:len(top_snippets)]) / len(top_snippets)

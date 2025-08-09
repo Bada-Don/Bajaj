@@ -14,7 +14,8 @@ class Config:
     # Model settings
     EMBEDDING_MODEL = "intfloat/e5-small-v2"
     RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    
+    LLM_MODEL_NAME = "granite3.1-moe:3b"
+
     # Document processing
     CHUNK_LENGTH = 600
     CHUNK_OVERLAP = 200
