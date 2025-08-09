@@ -12,16 +12,16 @@ class Config:
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
     
     # Model settings
-    EMBEDDING_MODEL = "intfloat/e5-small-v2"
-    RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5" # <-- CHANGED
+    RERANKER_MODEL = "mixedbread-ai/mxbai-rerank-base-v1" # <-- CHANGED
     LLM_MODEL_NAME = "granite3.1-moe:3b"
 
     # Document processing
-    CHUNK_LENGTH = 600
-    CHUNK_OVERLAP = 200
+    CHUNK_LENGTH = 400
+    CHUNK_OVERLAP = 100
     
     # Search settings
-    TOP_K_INITIAL = 25  # <-- CHANGED FROM 100 to 25
+    TOP_K_INITIAL = 30  # <-- CHANGED FROM 100 to 25
     TOP_K_RERANKED = 5
     
     # API settings
