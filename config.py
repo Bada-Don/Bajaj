@@ -21,8 +21,8 @@ class Config:
     CHUNK_OVERLAP = 100
     
     # Search settings
-    TOP_K_INITIAL = 30  # <-- CHANGED FROM 100 to 25
-    TOP_K_RERANKED = 5
+    TOP_K_INITIAL = 100  # <-- CHANGED FROM 100 to 25
+    TOP_K_RERANKED = 15
     
     # API settings
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
