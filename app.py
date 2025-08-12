@@ -24,7 +24,7 @@ from services.search_service import SearchService
 
 import asyncio
 from functools import partial
-
+import torch
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -322,6 +322,9 @@ async def process_hackrx_request(
                 top_k=Config.TOP_K_RERANKED
             )
             top_snippets = await asyncio.to_thread(rerank_func)
+
+            if Config.DEVICE == "cuda":
+                torch.cuda.empty_cache()
 
             # c) Generate Answer (I/O-bound, run asynchronously)
             answer = await search_serv.generate_answer_async(question, top_snippets)

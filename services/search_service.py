@@ -93,15 +93,14 @@ class SearchService:
         combined_context = "\n---\n".join(context_snippets)
         
         # --- COMPETITION-GRADE PROMPT ---
-        prompt = f"""You are a precise and methodical Q&A system for a competition.
+        prompt = f"""You are a legal expert assistant. Your task is to answer the user's query by synthesizing information *only* from the provided "Relevant Info". You must follow the example pattern.
 
-**Your Task:**
-Answer the user's 'Query' using *only* the information available in the 'Relevant Info' section.
+## Example ##
+Query: What is the purpose of Article 17?
+Relevant Info: "Article 17. Abolition of Untouchability.—Untouchability” is abolished and its practice in any form is forbidden. The enforcement of any disability arising out of “Untouchability” shall be an offence punishable in accordance with law."
+Answer: Article 17 is significant because it abolishes the practice of Untouchability, making its enforcement a punishable offense under the law.
 
-**Rules:**
-1.  **Strict Grounding:** Your entire answer must be derived from the 'Relevant Info'. Do not add outside information or make assumptions.
-2.  **"Not Found" Condition:** If the answer to the 'Query' cannot be found in the 'Relevant Info', you MUST reply with the following exact phrase and nothing else: `The answer to this question is not available in the provided information.`
-3.  **Completeness:** Formulate a complete, comprehensive answer. Do not leave sentences unfinished.
+## Your Task ##
 
 **Query:**
 {query}
